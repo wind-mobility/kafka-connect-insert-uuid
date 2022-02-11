@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.github.cjmatta.kafka.connect.smt;
+package co.wind.data.kafka.connect.smt;
 
 import io.confluent.connect.avro.SimpleAvroPartitioner;
 import org.apache.kafka.common.cache.Cache;
@@ -53,7 +53,8 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
                     "Field name for UUID")
             .define(ConfigName.UUID_CALCULATE_PARTITION_BEFORE_ADDING_UUID,
                     ConfigDef.Type.BOOLEAN, true, ConfigDef.Importance.HIGH,
-                    "Number of partitions in a topic")
+                    "Shall calculate the partition before inserting the UUID (only for Key). " +
+                            "It uses the Avro serializer for this purpose")
             .define(ConfigName.UUID_NUMBER_OF_PARTITIONS, ConfigDef.Type.INT, 1, ConfigDef.Importance.HIGH,
                     "Number of partitions in a topic");
 

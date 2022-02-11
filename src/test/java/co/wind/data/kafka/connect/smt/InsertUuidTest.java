@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-package com.github.cjmatta.kafka.connect.smt;
+package co.wind.data.kafka.connect.smt;
 
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
-import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
