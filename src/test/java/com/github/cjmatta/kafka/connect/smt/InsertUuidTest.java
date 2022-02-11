@@ -16,6 +16,7 @@
 
 package com.github.cjmatta.kafka.connect.smt;
 
+import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
@@ -25,6 +26,7 @@ import org.apache.kafka.connect.source.SourceRecord;
 import org.junit.After;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -47,7 +49,7 @@ public class InsertUuidTest {
   }
 
   @Test
-  public void copySchemaAndInsertUuidField() {
+  public void copySchemaAndInsertUuidField() throws RestClientException, IOException {
     final Map<String, Object> props = new HashMap<>();
 
     props.put("uuid.field.name", "myUuid");
@@ -74,6 +76,7 @@ public class InsertUuidTest {
       new SourceRecord(null, null, "test", 1, simpleStructSchema, new Struct(simpleStructSchema)));
     assertSame(transformedRecord.valueSchema(), transformedRecord2.valueSchema());
 
+    xform.mockSchemaRegistryClient.getAllSubjects().forEach(System.out::println);
   }
 
   @Test

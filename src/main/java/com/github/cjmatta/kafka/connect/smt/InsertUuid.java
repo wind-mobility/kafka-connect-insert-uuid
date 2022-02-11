@@ -15,7 +15,10 @@
  */
 
 package com.github.cjmatta.kafka.connect.smt;
-
+import io.confluent.connect.avro.SimpleAvroPartitioner;
+import io.confluent.connect.avro.AvroConverter;
+import io.confluent.kafka.schemaregistry.client.MockSchemaRegistryClient;
+import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.common.cache.Cache;
 import org.apache.kafka.common.cache.LRUCache;
 import org.apache.kafka.common.cache.SynchronizedCache;
@@ -30,9 +33,10 @@ import org.apache.kafka.connect.transforms.Transformation;
 import org.apache.kafka.connect.transforms.util.SchemaUtil;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectOutputStream;
+import java.util.*;
 
 import static org.apache.kafka.connect.transforms.util.Requirements.requireMap;
 import static org.apache.kafka.connect.transforms.util.Requirements.requireStruct;
@@ -44,24 +48,39 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
   private interface ConfigName {
     String UUID_FIELD_NAME = "uuid.field.name";
+    String UUID_PARTITION_NUMBER = "uuid.partition.number";
   }
 
   public static final ConfigDef CONFIG_DEF = new ConfigDef()
     .define(ConfigName.UUID_FIELD_NAME, ConfigDef.Type.STRING, "uuid", ConfigDef.Importance.HIGH,
-      "Field name for UUID");
+      "Field name for UUID")
+    .define(ConfigName.UUID_PARTITION_NUMBER, ConfigDef.Type.INT, 1, ConfigDef.Importance.HIGH,
+      "Number of partitions in a topic");
 
   private static final String PURPOSE = "adding UUID to record";
 
   private String fieldName;
+  private Integer numberOfPartitions;
 
   private Cache<Schema, Schema> schemaUpdateCache;
+
+  public final MockSchemaRegistryClient mockSchemaRegistryClient = new MockSchemaRegistryClient();
+  private final AvroConverter avroConverter = new AvroConverter(mockSchemaRegistryClient);
+
+  private final SimpleAvroPartitioner serializer = new SimpleAvroPartitioner();
+
 
   @Override
   public void configure(Map<String, ?> props) {
     final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
     fieldName = config.getString(ConfigName.UUID_FIELD_NAME);
+    numberOfPartitions = config.getInt(ConfigName.UUID_PARTITION_NUMBER);
 
     schemaUpdateCache = new SynchronizedCache<>(new LRUCache<Schema, Schema>(16));
+//    "schema.registry.url" -> "https://apicurio-dev.bi-wind.co/apis/ccompat/v6"
+//    MockSchemaRegistryClient mockSchemaRegistryClient = new MockSchemaRegistryClient();
+
+    avroConverter.configure(Collections.singletonMap("schema.registry.url", ""), true);
   }
 
 
@@ -81,11 +100,21 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
     updatedValue.put(fieldName, getRandomUuid());
 
-    return newRecord(record, null, updatedValue);
+    return newRecord(record, null, updatedValue, null);
   }
 
   private R applyWithSchema(R record) {
-    final Struct value = requireStruct(operatingValue(record), PURPOSE);
+    final Object object = operatingValue(record);
+    final Struct value = requireStruct(object, PURPOSE);
+//    final Integer partition = calculatePartition(value);
+    // final Integer partition = Utils.toPositive(Utils.murmur2(value.toString().getBytes())) % numberOfPartitions;
+
+//    final Integer partition = Utils.toPositive(Utils.murmur2(
+//      avroConverter.fromConnectData("", value.schema(), operatingValue(record))
+//    )) % numberOfPartitions;
+
+//    serializer.serialize(object, value.schema());
+    final Integer partition = serializer.getPartition(value.schema(), object, numberOfPartitions);
 
     Schema updatedSchema = schemaUpdateCache.get(value.schema());
     if(updatedSchema == null) {
@@ -101,7 +130,70 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
     updatedValue.put(fieldName, getRandomUuid());
 
-    return newRecord(record, updatedSchema, updatedValue);
+    return newRecord(record, updatedSchema, updatedValue, partition);
+  }
+
+
+  private Integer calculatePartition(Struct value) {
+    try (ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+      ObjectOutputStream out;
+      out = new ObjectOutputStream(bos);
+//      for (Field field : value.schema().fields()) {
+//        if (field.schema().type().isPrimitive()) {
+//          out.writeObject(value.get(field));
+//        }
+//      }
+      serialize(value, out);
+      out.flush();
+      byte[] bytes = bos.toByteArray();
+      return Utils.toPositive(Utils.murmur2(bytes)) % numberOfPartitions;
+    } catch (IOException e) {
+      e.printStackTrace();
+      return null;
+    }
+  }
+
+  private void serialize(Struct struct, ObjectOutputStream out) throws IOException {
+    for (Field field : struct.schema().fields()) {
+      Schema.Type type = field.schema().type();
+      Object value = struct.get(field);
+      if (type.isPrimitive()) {
+        out.writeObject(value);
+      } else {
+        switch (type) {
+          case ARRAY:
+            List<?> array = (List)value;
+            for (Object entry : array) {
+              if (entry instanceof Struct) {
+                serialize((Struct) entry, out);
+              } else {
+                out.writeObject(value);
+              }
+            }
+            break;
+          case MAP:
+            Map<?, ?> map = (Map)value;
+            Iterator it = map.entrySet().iterator();
+            while(it.hasNext()) {
+              Map.Entry<?, ?> entry = (Map.Entry)it.next();
+              if (entry.getKey() instanceof Struct) {
+                serialize((Struct) entry.getKey(), out);
+              } else {
+                out.writeObject(entry.getKey());
+              }
+              if (entry.getValue() instanceof Struct) {
+                serialize((Struct) entry.getValue(), out);
+              } else {
+                out.writeObject(entry.getValue());
+              }
+            }
+            break;
+          case STRUCT:
+            serialize((Struct) value, out);
+            break;
+        }
+      }
+    }
   }
 
   @Override
@@ -134,7 +226,7 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
   protected abstract Object operatingValue(R record);
 
-  protected abstract R newRecord(R record, Schema updatedSchema, Object updatedValue);
+  protected abstract R newRecord(R record, Schema updatedSchema, Object updatedValue, Integer partition);
 
   public static class Key<R extends ConnectRecord<R>> extends InsertUuid<R> {
 
@@ -149,8 +241,9 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
     }
 
     @Override
-    protected R newRecord(R record, Schema updatedSchema, Object updatedValue) {
-      return record.newRecord(record.topic(), record.kafkaPartition(), updatedSchema, updatedValue, record.valueSchema(), record.value(), record.timestamp());
+    protected R newRecord(R record, Schema updatedSchema, Object updatedValue, Integer partition) {
+//      return record.newRecord(record.topic(), record.kafkaPartition(), updatedSchema, updatedValue, record.valueSchema(), record.value(), record.timestamp());
+      return record.newRecord(record.topic(), partition, updatedSchema, updatedValue, record.valueSchema(), record.value(), record.timestamp());
     }
 
   }
@@ -168,8 +261,8 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
     }
 
     @Override
-    protected R newRecord(R record, Schema updatedSchema, Object updatedValue) {
-      return record.newRecord(record.topic(), record.kafkaPartition(), record.keySchema(), record.key(), updatedSchema, updatedValue, record.timestamp());
+    protected R newRecord(R record, Schema updatedSchema, Object updatedValue, Integer partition) {
+      return record.newRecord(record.topic(), partition, record.keySchema(), record.key(), updatedSchema, updatedValue, record.timestamp());
     }
 
   }
