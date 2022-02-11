@@ -40,38 +40,43 @@ import static org.apache.kafka.connect.transforms.util.Requirements.requireStruc
 public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transformation<R> {
 
     public static final String OVERVIEW_DOC =
-            "Insert a random UUID into a connect record";
+            "Insert a random UUID into a connect record, optionally with partition calculation if is key";
 
     private interface ConfigName {
         String UUID_FIELD_NAME = "uuid.field.name";
-        String UUID_PARTITION_NUMBER = "uuid.partition.number";
+        String UUID_CALCULATE_PARTITION_BEFORE_ADDING_UUID = "uuid.calculate.partition.before.adding.uuid";
+        String UUID_NUMBER_OF_PARTITIONS = "uuid.number.of.partitions";
     }
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
             .define(ConfigName.UUID_FIELD_NAME, ConfigDef.Type.STRING, "uuid", ConfigDef.Importance.HIGH,
                     "Field name for UUID")
-            .define(ConfigName.UUID_PARTITION_NUMBER, ConfigDef.Type.INT, 1, ConfigDef.Importance.HIGH,
+            .define(ConfigName.UUID_CALCULATE_PARTITION_BEFORE_ADDING_UUID,
+                    ConfigDef.Type.BOOLEAN, true, ConfigDef.Importance.HIGH,
+                    "Number of partitions in a topic")
+            .define(ConfigName.UUID_NUMBER_OF_PARTITIONS, ConfigDef.Type.INT, 1, ConfigDef.Importance.HIGH,
                     "Number of partitions in a topic");
 
     private static final String PURPOSE = "adding UUID to record";
 
     private String fieldName;
     private Integer numberOfPartitions;
+    private Boolean calculatePartitionBeforeAddingUUID;
 
     private Cache<Schema, Schema> schemaUpdateCache;
 
-    private final SimpleAvroPartitioner serializer = new SimpleAvroPartitioner();
-
+    private final SimpleAvroPartitioner partitioner = new SimpleAvroPartitioner();
 
     @Override
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
         fieldName = config.getString(ConfigName.UUID_FIELD_NAME);
-        numberOfPartitions = config.getInt(ConfigName.UUID_PARTITION_NUMBER);
+        numberOfPartitions = config.getInt(ConfigName.UUID_NUMBER_OF_PARTITIONS);
+        calculatePartitionBeforeAddingUUID = config.getBoolean(
+                ConfigName.UUID_CALCULATE_PARTITION_BEFORE_ADDING_UUID);
 
-        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<Schema, Schema>(16));
+        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<>(16));
     }
-
 
     @Override
     public R apply(R record) {
@@ -95,7 +100,11 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
     private R applyWithSchema(R record) {
         final Object object = operatingValue(record);
         final Struct value = requireStruct(object, PURPOSE);
-        final Integer partition = serializer.getPartition(value.schema(), object, numberOfPartitions);
+
+        Integer partition = record.kafkaPartition();
+        if (calculatePartitionBeforeAddingUUID && isKey()) {
+            partition = partitioner.getPartition(value.schema(), object, numberOfPartitions);
+        }
 
         Schema updatedSchema = schemaUpdateCache.get(value.schema());
         if (updatedSchema == null) {
@@ -146,6 +155,8 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
     protected abstract R newRecord(R record, Schema updatedSchema, Object updatedValue, Integer partition);
 
+    protected abstract boolean isKey();
+
     public static class Key<R extends ConnectRecord<R>> extends InsertUuid<R> {
 
         @Override
@@ -160,10 +171,14 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
         @Override
         protected R newRecord(R record, Schema updatedSchema, Object updatedValue, Integer partition) {
-//      return record.newRecord(record.topic(), record.kafkaPartition(), updatedSchema, updatedValue, record.valueSchema(), record.value(), record.timestamp());
-            return record.newRecord(record.topic(), partition, updatedSchema, updatedValue, record.valueSchema(), record.value(), record.timestamp());
+            return record.newRecord(record.topic(), partition, updatedSchema,
+                    updatedValue, record.valueSchema(), record.value(), record.timestamp());
         }
 
+        @Override
+        protected boolean isKey() {
+            return true;
+        }
     }
 
     public static class Value<R extends ConnectRecord<R>> extends InsertUuid<R> {
@@ -180,9 +195,14 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
         @Override
         protected R newRecord(R record, Schema updatedSchema, Object updatedValue, Integer partition) {
-            return record.newRecord(record.topic(), partition, record.keySchema(), record.key(), updatedSchema, updatedValue, record.timestamp());
+            return record.newRecord(record.topic(), partition, record.keySchema(),
+                    record.key(), updatedSchema, updatedValue, record.timestamp());
         }
 
+        @Override
+        protected boolean isKey() {
+            return false;
+        }
     }
 }
 

@@ -75,8 +75,6 @@ public class InsertUuidTest {
     final SourceRecord transformedRecord2 = xform.apply(
       new SourceRecord(null, null, "test", 1, simpleStructSchema, new Struct(simpleStructSchema)));
     assertSame(transformedRecord.valueSchema(), transformedRecord2.valueSchema());
-
-    xform.mockSchemaRegistryClient.getAllSubjects().forEach(System.out::println);
   }
 
   @Test
