@@ -43,6 +43,7 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
     private interface ConfigName {
         String UUID_FIELD_NAME = "uuid.field.name";
+        String UUID_SCHEMA_NAME_WHEN_NULL = "uuid.schema.name.when.null";
         String UUID_CALCULATE_PARTITION_BEFORE_ADDING_UUID = "uuid.calculate.partition.before.adding.uuid";
         String UUID_NUMBER_OF_PARTITIONS = "uuid.number.of.partitions";
     }
@@ -55,11 +56,14 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
                     "Shall calculate the partition before inserting the UUID (only for Key). " +
                             "It uses the Avro serializer for this purpose")
             .define(ConfigName.UUID_NUMBER_OF_PARTITIONS, ConfigDef.Type.INT, 1, ConfigDef.Importance.HIGH,
-                    "Number of partitions in a topic");
+                    "Number of partitions in a topic")
+            .define(ConfigName.UUID_SCHEMA_NAME_WHEN_NULL, ConfigDef.Type.STRING, "uuid", ConfigDef.Importance.HIGH,
+                    "Schema name when operating value is null (usually 'Key' or 'Envelope' when target struct is key or value, respectively)");
 
     private static final String PURPOSE = "adding UUID to record";
 
     private String fieldName;
+    private String schemaNameWhenNull;
     private Integer numberOfPartitions;
     private Boolean calculatePartitionBeforeAddingUUID;
 
@@ -73,6 +77,7 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
         fieldName = config.getString(ConfigName.UUID_FIELD_NAME);
+        schemaNameWhenNull = config.getString(ConfigName.UUID_SCHEMA_NAME_WHEN_NULL);
         numberOfPartitions = config.getInt(ConfigName.UUID_NUMBER_OF_PARTITIONS);
         calculatePartitionBeforeAddingUUID = config.getBoolean(
                 ConfigName.UUID_CALCULATE_PARTITION_BEFORE_ADDING_UUID);
@@ -81,7 +86,7 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
         uuidOnlySchema = SchemaBuilder
                 .struct()
-                .name(fieldName)
+                .name(schemaNameWhenNull)
                 .version(1)
                 .doc("default uuid schema")
                 .field(fieldName, Schema.STRING_SCHEMA)
