@@ -67,6 +67,8 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
 
     private final SimpleAvroPartitioner partitioner = new SimpleAvroPartitioner();
 
+    private Schema uuidOnlySchema;
+
     @Override
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
@@ -76,11 +78,22 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
                 ConfigName.UUID_CALCULATE_PARTITION_BEFORE_ADDING_UUID);
 
         schemaUpdateCache = new SynchronizedCache<>(new LRUCache<>(16));
+
+        uuidOnlySchema = SchemaBuilder
+                .struct()
+                .name(fieldName)
+                .version(1)
+                .doc("default uuid schema")
+                .field(fieldName, Schema.STRING_SCHEMA)
+                .build();
     }
 
     @Override
     public R apply(R record) {
         if (operatingSchema(record) == null) {
+            if (operatingValue(record) == null) {
+                return applyWithDefaultSchema(record);
+            }
             return applySchemaless(record);
         } else {
             return applyWithSchema(record);
@@ -95,6 +108,12 @@ public abstract class InsertUuid<R extends ConnectRecord<R>> implements Transfor
         updatedValue.put(fieldName, getRandomUuid());
 
         return newRecord(record, null, updatedValue, null);
+    }
+
+    private R applyWithDefaultSchema(R record) {
+        final Struct newValue = new Struct(uuidOnlySchema);
+        newValue.put(fieldName, getRandomUuid());
+        return newRecord(record, uuidOnlySchema, newValue, record.kafkaPartition());
     }
 
     private R applyWithSchema(R record) {

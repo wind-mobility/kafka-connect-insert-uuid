@@ -111,7 +111,7 @@ public class InsertUuidTest {
     }
 
     @Test
-    public void copySchemaAndInsertUuidFieldWitPartitioner() {
+    public void copySchemaAndInsertUuidFieldWithPartitioner() {
         final Map<String, Object> props = new HashMap<>();
 
         props.put("uuid.field.name", "myUuid");
@@ -149,6 +149,22 @@ public class InsertUuidTest {
         assertNotEquals(uuid1, uuid2);
         assertNotEquals(uuid1, uuid3);
         assertNotEquals(uuid2, uuid3);
+    }
+
+    @Test
+    public void createSchemaAndInsertUuidFieldInNullRecord() {
+        final Map<String, Object> props = new HashMap<>();
+
+        props.put("uuid.field.name", "myUuid");
+        props.put("uuid.calculate.partition.before.adding.uuid", true);
+        props.put("uuid.number.of.partitions", 32);
+
+        xformKey.configure(props);
+
+        final SourceRecord nullRecord = getRecordWithKey(null, null);
+        final SourceRecord transformedRecord = xformKey.apply(nullRecord);
+        final String uuid = ((Struct) transformedRecord.key()).getString("myUuid");
+        assertTrue(uuid.length() > 0);
     }
 
     private SourceRecord getRecordWithKey(Schema keySchema, Object key) {
