@@ -1,5 +1,6 @@
-package io.confluent.connect.avro;
+package co.wind.data.kafka.connect.smt;
 
+import io.confluent.connect.avro.AvroData;
 import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.confluent.kafka.serializers.NonRecordContainer;
 import org.apache.avro.generic.GenericData;
@@ -32,7 +33,7 @@ public class SimpleAvroPartitioner {
 
     private byte[] fromConnectData(org.apache.kafka.connect.data.Schema kafkaSchema, Object kafkaConnectObject) {
         org.apache.avro.Schema avroSchema = avroData.fromConnectSchema(kafkaSchema);
-        Object avroObject = avroData.fromConnectData(kafkaSchema, avroSchema, kafkaConnectObject);
+        Object avroObject = avroData.fromConnectData(kafkaSchema, kafkaConnectObject);
         return avroSerialize(avroObject, new AvroSchema(avroSchema));
     }
 

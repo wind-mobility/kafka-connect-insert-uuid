@@ -16,7 +16,6 @@
 
 package co.wind.data.kafka.connect.smt;
 
-import io.confluent.connect.avro.SimpleAvroPartitioner;
 import org.apache.kafka.common.cache.Cache;
 import org.apache.kafka.common.cache.LRUCache;
 import org.apache.kafka.common.cache.SynchronizedCache;
